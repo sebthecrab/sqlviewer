@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SQLite Browser (Client-Only, sql.js)</title>
+  <!-- Bootstrap 5.3 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <style>
+    :root { --sidebar-w: 320px; }
+    body { overflow: hidden; }
+    .app { display: grid; grid-template-columns: var(--sidebar-w) 1fr; grid-template-rows: auto 1fr; height: 100vh; }
+    header { grid-column: 1 / -1; }
+    #sidebar { overflow: auto; border-right: 1px solid #e5e5e5; }
+    #main { overflow: auto; }
+    .table-wrap { overflow: auto; max-height: 50vh; border: 1px solid #eee; border-radius: .5rem; }
+    .code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    td[contenteditable="true"] { outline: 2px dashed transparent; }
+    td[contenteditable="true"].dirty { background: #fff9e6; outline-color: #ffe08a; }
+    .status-dot { width: .6rem; height: .6rem; border-radius: 50%; display: inline-block; margin-right: .4rem; }
+    .status-ok { background: #22c55e; }
+    .status-busy { background: #f59e0b; }
+    .status-none { background: #9ca3af; }
+    .small-muted { font-size: .9rem; color: #6b7280; }
+    .sticky-top-lite { position: sticky; top: 0; z-index: 5; background: #fff; }
+    .paginate button { min-width: 2.5rem; }
+    .footer-shadow { box-shadow: 0 -6px 12px rgba(0,0,0,.04); }
+    @media (max-width: 992px) {
+      .app { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; }
+      #sidebar { grid-row: 2; border-right: none; border-bottom: 1px solid #e5e5e5; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="p-3 border-bottom bg-light">
+      <div class="container-fluid d-flex align-items-center gap-3">
+        <h1 class="h4 mb-0">SQLite Browser (nur Browser, kein Server)</h1>
+        <span id="status" class="small-muted ms-auto">
+          <span class="status-dot status-none" id="statusDot"></span><span id="statusText">Keine Datei geladen</span>
+        </span>
+      </div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside id="sidebar" class="p-3">
+      <div class="d-flex flex-column gap-3">
+        <div class="card">
+          <div class="card-body">
+            <label for="fileInput" class="form-label fw-semibold">Datenbank-Datei öffnen</label>
+            <input class="form-control" type="file" id="fileInput" accept=".sqlite,.db,.sqlite3,.sqlite2,.sqlite,.db3,.db2,application/octet-stream" />
+            <div class="d-flex gap-2 mt-3">
+              <button id="btnExport" class="btn btn-outline-primary btn-sm" disabled>Geänderte DB herunterladen</button>
+              <button id="btnNewDB" class="btn btn-outline-secondary btn-sm">Neue leere DB</button>
+            </div>
+            <p class="small text-muted mt-2 mb-0">
+              Läuft vollständig lokal im Browser mit <span class="code">sql.js</span>.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between">
+              <h2 class="h6 mb-0">Tabellen</h2>
+              <button id="btnRefreshTables" class="btn btn-light btn-sm">Aktualisieren</button>
+            </div>
+            <hr />
+            <div id="tablesList" class="list-group small"></div>
+            <div id="noTablesHint" class="text-muted small mt-2 d-none">Keine Tabellen gefunden.</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-body">
+            <h2 class="h6">Schnellaktionen</h2>
+            <div class="d-grid gap-2">
+              <button id="btnCreateTable" class="btn btn-outline-success btn-sm">Tabelle erstellen</button>
+              <button id="btnDropTable" class="btn btn-outline-danger btn-sm">Tabelle löschen</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main id="main" class="p-3">
+      <div class="container-fluid d-flex flex-column gap-3">
+        <!-- Query Editor -->
+        <section class="card">
+          <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between">
+              <h2 class="h6 mb-0">SQL-Editor</h2>
+              <div class="d-flex gap-2">
+                <button id="btnRun" class="btn btn-primary btn-sm" disabled>Abfrage ausführen</button>
+                <button id="btnExplain" class="btn btn-outline-secondary btn-sm" disabled>EXPLAIN</button>
+              </div>
+            </div>
+            <textarea id="sqlInput" class="form-control code mt-3" rows="5" placeholder="Beispiel: SELECT name FROM sqlite_master WHERE type='table';" disabled></textarea>
+            <div class="small text-muted mt-2">Tipp: Wähle links eine Tabelle aus, um automatisch ein SELECT zu erhalten.</div>
+          </div>
+        </section>
+
+        <!-- Results & Table Viewer -->
+        <section class="card">
+          <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between sticky-top-lite pt-2 pb-2">
+              <div class="d-flex align-items-center gap-2">
+                <h2 class="h6 mb-0">Ergebnisse</h2>
+                <span id="resultInfo" class="badge text-bg-light">0 Zeilen</span>
+              </div>
+              <div class="d-flex align-items-center gap-2">
+                <label class="small text-muted">Limit</label>
+                <input type="number" id="pageSize" class="form-control form-control-sm" style="width: 6rem;" value="100" min="10" max="10000" />
+                <div class="paginate btn-group">
+                  <button id="prevPage" class="btn btn-outline-secondary btn-sm" disabled>&laquo;</button>
+                  <button id="nextPage" class="btn btn-outline-secondary btn-sm" disabled>&raquo;</button>
+                </div>
+                <button id="btnSaveChanges" class="btn btn-success btn-sm" disabled>Änderungen speichern</button>
+              </div>
+            </div>
+
+            <div id="results" class="table-wrap mt-3">
+              <table class="table table-sm table-hover align-middle mb-0">
+                <thead id="thead"></thead>
+                <tbody id="tbody"></tbody>
+              </table>
+            </div>
+
+            <div id="message" class="mt-3 small"></div>
+          </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer-shadow p-3 rounded bg-light">
+          <div class="d-flex flex-column flex-lg-row gap-2 align-items-start align-items-lg-center justify-content-between">
+            <div class="small-muted">
+              Änderungen erfolgen im Speicher der geladenen DB. Mit <em>„Geänderte DB herunterladen“</em> speicherst du die Datei lokal ab.
+            </div>
+            <div class="small-muted">
+              Powered by <span class="code">sql.js</span> – <a href="https://github.com/sql-js/sql.js" target="_blank" rel="noopener">Projekt</a>
+            </div>
+          </div>
+        </footer>
+      </div>
+    </main>
+  </div>
+
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- sql.js (WASM) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/sql-wasm.js"></script>
+  <script>
+    // --- State ---
+    let SQL = null;
+    let db = null;
+    let currentTable = null;
+    let currentRows = [];
+    let currentColumns = [];
+    let page = 0;
+
+    // UI helpers
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+    const statusDot = $('#statusDot');
+    const statusText = $('#statusText');
+    const setStatus = (text, mode = 'none') => {
+      statusText.textContent = text;
+      statusDot.className = 'status-dot ' + (mode === 'ok' ? 'status-ok' : mode === 'busy' ? 'status-busy' : 'status-none');
+    };
+
+    const message = (html, type='secondary') => {
+      $('#message').innerHTML = `<div class="alert alert-${type} mb-0">${html}</div>`;
+    };
+
+    const clearResults = () => {
+      $('#thead').innerHTML = '';
+      $('#tbody').innerHTML = '';
+      $('#resultInfo').textContent = '0 Zeilen';
+    };
+
+    // Initialize sql.js
+    (async function init() {
+      setStatus('Lade SQL-Engine …', 'busy');
+      SQL = await initSqlJs({
+        locateFile: file => 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.2/' + file
+      });
+      setStatus('Bereit. Keine Datei geladen', 'none');
+      $('#btnNewDB').disabled = false;
+    })();
+
+    // File open
+    $('#fileInput').addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setStatus('Lade Datenbank …', 'busy');
+      const buf = new Uint8Array(await file.arrayBuffer());
+      try {
+        db?.close?.();
+      } catch {}
+      db = new SQL.Database(buf);
+      onDbLoaded(file.name);
+    });
+
+    // New DB
+    $('#btnNewDB').addEventListener('click', () => {
+      try { db?.close?.(); } catch {}
+      db = new SQL.Database(); // empty
+      onDbLoaded('NeueDatenbank (im Speicher)');
+    });
+
+    function onDbLoaded(name) {
+      setStatus('Geladen: ' + name, 'ok');
+      $('#btnExport').disabled = false;
+      $('#btnRun').disabled = false;
+      $('#btnExplain').disabled = false;
+      $('#sqlInput').disabled = false;
+      page = 0;
+      currentTable = null;
+      refreshTables();
+      clearResults();
+      message(`<strong>Datenbank geladen.</strong> Wähle links eine Tabelle oder führe eine Abfrage aus.`, 'success');
+    }
+
+    // Export DB
+    $('#btnExport').addEventListener('click', () => {
+      if (!db) return;
+      const bin = db.export();
+      const blob = new Blob([bin], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dt = new Date().toISOString().replace(/[:.]/g, '-');
+      a.href = url;
+      a.download = `database_${dt}.sqlite`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // Load table list
+    $('#btnRefreshTables').addEventListener('click', refreshTables);
+    function refreshTables() {
+      if (!db) return;
+      const tables = execRaw(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;`);
+      const list = $('#tablesList');
+      list.innerHTML = '';
+      if (!tables?.[0]?.values?.length) {
+        $('#noTablesHint').classList.remove('d-none');
+      } else {
+        $('#noTablesHint').classList.add('d-none');
+        tables[0].values.forEach(([name]) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
+          btn.textContent = name;
+          btn.addEventListener('click', () => openTable(name));
+          list.appendChild(btn);
+        });
+      }
+    }
+
+    // Quick actions
+    $('#btnCreateTable').addEventListener('click', async () => {
+      if (!db) return;
+      const name = prompt('Name der neuen Tabelle (z. B. people):');
+      if (!name) return;
+      const cols = prompt('Spalten-Definition (SQL), z. B. id INTEGER PRIMARY KEY, name TEXT, age INTEGER:');
+      if (cols === null) return;
+      try {
+        db.run(`CREATE TABLE "${name}" (${cols});`);
+        refreshTables();
+        message(`Tabelle <strong>${escapeHtml(name)}</strong> erstellt.`, 'success');
+      } catch (e) {
+        message(`Fehler beim Erstellen: <code class="code">${escapeHtml(e.message)}</code>`, 'danger');
+      }
+    });
+
+    $('#btnDropTable').addEventListener('click', () => {
+      if (!db) return;
+      const name = prompt('Welche Tabelle löschen? (exakter Name)');
+      if (!name) return;
+      if (!confirm(`Tabelle "${name}" wirklich löschen?`)) return;
+      try {
+        db.run(`DROP TABLE "${name}";`);
+        refreshTables();
+        clearResults();
+        message(`Tabelle <strong>${escapeHtml(name)}</strong> gelöscht.`, 'warning');
+      } catch (e) {
+        message(`Fehler beim Löschen: <code class="code">${escapeHtml(e.message)}</code>`, 'danger');
+      }
+    });
+
+    // Open table (with pagination)
+    async function openTable(name) {
+      if (!db) return;
+      currentTable = name;
+      page = 0;
+      loadPage();
+      // preload SQL input with simple select
+      $('#sqlInput').value = `SELECT * FROM "${name}" LIMIT 100;`;
+      message(`Tabelle <strong>${escapeHtml(name)}</strong> geöffnet.`, 'info');
+    }
+
+    function loadPage() {
+      const size = Math.max(10, Math.min(10000, parseInt($('#pageSize').value || '100', 10)));
+      const offset = page * size;
+
+      try {
+        // Try to fetch ROWID for editable updates
+        const res = execRaw(`SELECT rowid AS __rowid__, * FROM "${currentTable}" LIMIT ${size} OFFSET ${offset};`);
+        const countRes = execRaw(`SELECT COUNT(*) AS cnt FROM "${currentTable}";`);
+        const total = countRes?.[0]?.values?.[0]?.[0] ?? 0;
+
+        renderResult(res);
+        $('#resultInfo').textContent = `${res?.[0]?.values?.length || 0} Zeilen (Seite ${page + 1}, gesamt ${total})`;
+        $('#prevPage').disabled = page <= 0;
+        $('#nextPage').disabled = (offset + size) >= total;
+        $('#btnSaveChanges').disabled = false;
+      } catch (e) {
+        // Fallback for WITHOUT ROWID or views
+        const res = execRaw(`SELECT * FROM "${currentTable}" LIMIT ${size} OFFSET ${offset};`);
+        renderResult(res, /*editable=*/false);
+        $('#resultInfo').textContent = `${res?.[0]?.values?.length || 0} Zeilen (Seite ${page + 1})`;
+        $('#prevPage').disabled = page <= 0;
+        $('#nextPage').disabled = (res?.[0]?.values?.length || 0) < size;
+        $('#btnSaveChanges').disabled = true;
+        message(`Hinweis: Tabelle hat evtl. <em>WITHOUT ROWID</em> oder ist eine View – Inline-Bearbeitung deaktiviert.`, 'warning');
+      }
+    }
+
+    $('#prevPage').addEventListener('click', () => { if (page > 0) { page--; loadPage(); } });
+    $('#nextPage').addEventListener('click', () => { page++; loadPage(); });
+
+    // Run SQL from editor
+    $('#btnRun').addEventListener('click', () => {
+      if (!db) return;
+      const sql = $('#sqlInput').value.trim();
+      if (!sql) return;
+      try {
+        const out = execRaw(sql);
+        if (!out.length) {
+          clearResults();
+          message('Abfrage ausgeführt (kein Ergebnis-Resultset).', 'success');
+          refreshTables(); // schema may have changed
+        } else {
+          renderResult(out, /*editable=*/false);
+          $('#resultInfo').textContent = `${out[0].values.length} Zeilen (custom query)`;
+          $('#btnSaveChanges').disabled = true;
+          message('Abfrage erfolgreich.', 'success');
+        }
+      } catch (e) {
+        message(`SQL-Fehler: <code class="code">${escapeHtml(e.message)}</code>`, 'danger');
+      }
+    });
+
+    // Explain
+    $('#btnExplain').addEventListener('click', () => {
+      if (!db) return;
+      const sql = $('#sqlInput').value.trim();
+      if (!sql) return;
+      try {
+        const out = execRaw('EXPLAIN ' + sql);
+        renderResult(out, /*editable=*/false);
+        $('#resultInfo').textContent = `${out[0]?.values?.length || 0} Zeilen (EXPLAIN)`;
+        $('#btnSaveChanges').disabled = true;
+        message('EXPLAIN ausgeführt.', 'info');
+      } catch (e) {
+        message(`EXPLAIN-Fehler: <code class="code">${escapeHtml(e.message)}</code>`, 'danger');
+      }
+    });
+
+    // Save changes (inline edits -> UPDATE ... WHERE rowid = ?)
+    $('#btnSaveChanges').addEventListener('click', () => {
+      if (!db || !currentTable) return;
+      const dirtyCells = $$('#tbody td[contenteditable="true"].dirty');
+      if (!dirtyCells.length) {
+        message('Keine Änderungen vorhanden.', 'secondary');
+        return;
+      }
+      // Aggregate changes per rowid
+      const changesByRow = new Map();
+      for (const td of dirtyCells) {
+        const col = td.dataset.col;
+        const val = td.textContent;
+        const rowid = td.dataset.rowid;
+        if (!changesByRow.has(rowid)) changesByRow.set(rowid, new Map());
+        changesByRow.get(rowid).set(col, val);
+      }
+
+      try {
+        db.run('BEGIN;');
+        for (const [rowid, changes] of changesByRow.entries()) {
+          const sets = [];
+          const params = [];
+          for (const [col, val] of changes.entries()) {
+            sets.push(`"${col}" = ?`);
+            params.push(val);
+          }
+          params.push(rowid);
+          const sql = `UPDATE "${currentTable}" SET ${sets.join(', ')} WHERE rowid = ?;`;
+          const stmt = db.prepare(sql);
+          stmt.bind(params);
+          stmt.step();
+          stmt.free();
+        }
+        db.run('COMMIT;');
+        // Clean state
+        dirtyCells.forEach(td => { td.classList.remove('dirty'); td.dataset.original = td.textContent; });
+        message(`Änderungen gespeichert: ${changesByRow.size} Zeile(n) aktualisiert.`, 'success');
+      } catch (e) {
+        try { db.run('ROLLBACK;'); } catch {}
+        message(`Fehler beim Speichern: <code class="code">${escapeHtml(e.message)}</code>`, 'danger');
+      }
+    });
+
+    // Render resultset
+    function renderResult(result, editableDefault = true) {
+      clearResults();
+      if (!result || !result.length) return;
+      const { columns, values } = result[0];
+      currentColumns = columns;
+      currentRows = values;
+
+      // Build header
+      const thead = $('#thead');
+      const trh = document.createElement('tr');
+      columns.forEach(c => {
+        const th = document.createElement('th');
+        th.textContent = c;
+        trh.appendChild(th);
+      });
+      thead.appendChild(trh);
+
+      // Build body
+      const tbody = $('#tbody');
+      const rowidIdx = columns.indexOf('__rowid__');
+      values.forEach(row => {
+        const tr = document.createElement('tr');
+        const rowid = rowidIdx >= 0 ? row[rowidIdx] : null;
+        row.forEach((cell, idx) => {
+          const td = document.createElement('td');
+          td.textContent = cell === null ? 'NULL' : String(cell);
+          td.dataset.col = columns[idx];
+          if (rowid !== null && columns[idx] !== '__rowid__' && editableDefault) {
+            td.setAttribute('contenteditable', 'true');
+            td.dataset.rowid = rowid;
+            td.dataset.original = td.textContent;
+            td.addEventListener('input', () => {
+              if (td.textContent !== td.dataset.original) td.classList.add('dirty');
+              else td.classList.remove('dirty');
+            });
+          } else {
+            td.setAttribute('contenteditable', 'false');
+          }
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Exec helper returning array of resultsets
+    function execRaw(sql) {
+      // Support multiple statements
+      const results = db.exec(sql);
+      return results;
+    }
+
+    // Escape HTML
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+
+    // Page size change
+    $('#pageSize').addEventListener('change', () => {
+      if (currentTable) loadPage();
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      // Ctrl/Cmd + Enter = Run
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        if (!$('#btnRun').disabled) $('#btnRun').click();
+      }
+    });
+  </script>
+</body>
+</html>
