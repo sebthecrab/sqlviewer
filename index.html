@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>SQLite Browser</title>
+  <title>SQLite Browser – v03 mit Filter, Hervorhebung & Sortierung</title>
   <!-- Bootstrap 5.3 -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <style>
@@ -32,13 +32,36 @@
     .th-highlight::after {
       content: "🎯";
       position: absolute;
-      right: .4rem;
+      right: 1.6rem; /* Platz für Sort-Icon */
       top: 50%;
       transform: translateY(-50%);
       font-size: .9rem;
       opacity: .6;
+      pointer-events: none;
     }
-    /* Pastellfarben per Inline-Style; hier nur ein Fallback border-radius */
+    /* Sort-Indikator */
+    .th-sort { position: relative; cursor: pointer; user-select: none; }
+    .th-sort .sort-ind {
+      position: absolute;
+      right: .4rem;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: .85rem;
+      opacity: .7;
+      pointer-events: none;
+    }
+    .th-sort .sort-idx {
+      position: absolute;
+      right: 1.25rem;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: .7rem;
+      background: #f1f5f9;
+      color: #475569;
+      border-radius: .3rem;
+      padding: 0 .25rem;
+      pointer-events: none;
+    }
     td.hl { border-radius: .25rem; }
     @media (max-width: 992px) {
       .app { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; }
@@ -51,7 +74,7 @@
     <!-- Header -->
     <header class="p-3 border-bottom bg-light">
       <div class="container-fluid d-flex align-items-center gap-3">
-        <h1 class="h5 mb-0">SQLite Browser – v02</h1>
+        <h1 class="h5 mb-0">SQLite Browser – v03</h1>
         <span id="status" class="small-muted ms-auto">
           <span class="status-dot status-none" id="statusDot"></span><span id="statusText">Keine Datei geladen</span>
         </span>
@@ -69,9 +92,6 @@
               <button id="btnExport" class="btn btn-outline-primary btn-sm" disabled>Geänderte DB herunterladen</button>
               <button id="btnNewDB" class="btn btn-outline-secondary btn-sm">Neue leere DB</button>
             </div>
-            <p class="small text-muted mt-2 mb-0">
-              Läuft vollständig lokal im Browser mit <span class="code">sql.js</span>.
-            </p>
           </div>
         </div>
 
@@ -120,7 +140,7 @@
         <!-- Filters + Results -->
         <section class="card">
           <div class="card-body">
-            <!-- Filter-Builder -->
+            <!-- Filter-Builder + Sort Controls -->
             <div class="sticky-top-lite pt-2 pb-2">
               <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
                 <div class="d-flex align-items-center gap-2 filters">
@@ -145,8 +165,24 @@
                   <button id="btnClearFilters" class="btn btn-outline-secondary btn-sm" disabled>Alle Filter löschen</button>
                 </div>
 
-                <div class="d-flex align-items-center gap-2">
-                  <label class="small text-muted">Limit</label>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                  <div class="d-flex align-items-center gap-2">
+                    <label class="small text-muted">Hervorheben nach</label>
+                    <select id="highlightColumn" class="form-select form-select-sm" disabled style="min-width: 12rem;">
+                      <option value="">– aus –</option>
+                    </select>
+                    <div class="form-check form-switch">
+                      <input class="form-check-input" type="checkbox" id="highlightOnlyDuplicates" disabled>
+                      <label class="form-check-label small" for="highlightOnlyDuplicates">nur Duplikate</label>
+                    </div>
+                  </div>
+
+                  <div class="d-flex align-items-center gap-2 ms-lg-3">
+                    <span class="small text-muted">Sortierung</span>
+                    <button id="btnClearSort" class="btn btn-outline-secondary btn-sm" disabled>Sortierung zurücksetzen</button>
+                  </div>
+
+                  <label class="small text-muted ms-lg-2">Limit</label>
                   <input type="number" id="pageSize" class="form-control form-control-sm" style="width: 6rem;" value="100" min="10" max="10000" />
                   <div class="paginate btn-group">
                     <button id="prevPage" class="btn btn-outline-secondary btn-sm" disabled>&laquo;</button>
@@ -156,23 +192,13 @@
                 </div>
               </div>
 
-              <!-- Aktive Filter Pills + Highlight Controls -->
+              <!-- Aktive Filter Pills -->
               <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
                 <div id="activeFilters" class="d-flex flex-wrap gap-2"></div>
-                <div class="d-flex align-items-center gap-2">
-                  <label class="small text-muted">Hervorheben nach Spalte</label>
-                  <select id="highlightColumn" class="form-select form-select-sm" disabled style="min-width: 12rem;">
-                    <option value="">– aus –</option>
-                  </select>
-                  <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="highlightOnlyDuplicates" disabled>
-                    <label class="form-check-label small" for="highlightOnlyDuplicates">nur Duplikate</label>
-                  </div>
+                <div class="small text-muted">
+                  <span id="resultInfo" class="badge text-bg-light">0 Zeilen</span>
+                  <span class="ms-2">Klick auf Spaltenkopf sortiert (Shift = Mehrfach). Rechtsklick auf eine Zelle → „Nach diesem Wert filtern“.</span>
                 </div>
-              </div>
-              <div class="mt-1 small text-muted">
-                <span id="resultInfo" class="badge text-bg-light">0 Zeilen</span>
-                <span class="ms-2">Klick auf Spaltenkopf setzt die Hervorhebungs-Spalte. Rechtsklick auf eine Zelle → „Nach diesem Wert filtern“.</span>
               </div>
             </div>
 
@@ -194,9 +220,6 @@
             <div class="small-muted">
               Änderungen erfolgen im Speicher der geladenen DB. Mit <em>„Geänderte DB herunterladen“</em> speicherst du die Datei lokal ab.
             </div>
-            <div class="small-muted">
-              Powered by <span class="code">sql.js</span> – <a href="https://github.com/sql-js/sql.js" target="_blank" rel="noopener">Projekt</a>
-            </div>
           </div>
         </footer>
       </div>
@@ -217,10 +240,12 @@
     let filteredRows = [];
     let page = 0;
 
-    // Filter / Highlight State
+    // Filter / Highlight / Sort State
     const filters = []; // {col, op, val}
     let highlightCol = '';
     let highlightOnlyDup = false;
+    // sortState: Array von { idx (Spaltenindex), dir: 'asc'|'desc' }
+    let sortState = [];
 
     // UI helpers
     const $ = (sel) => document.querySelector(sel);
@@ -270,7 +295,7 @@
 
     function onDbLoaded(name) {
       setStatus('Geladen: ' + name, 'ok');
-      ['btnExport','btnRun','btnExplain','sqlInput','btnAddFilter','btnClearFilters','filterColumn','filterOperator','filterValue','highlightColumn','highlightOnlyDuplicates'].forEach(id => {
+      ['btnExport','btnRun','btnExplain','sqlInput','btnAddFilter','btnClearFilters','filterColumn','filterOperator','filterValue','highlightColumn','highlightOnlyDuplicates','btnClearSort'].forEach(id => {
         if ($(id.startsWith('#')? id : '#'+id)) $(id.startsWith('#')? id : '#'+id).disabled = false;
       });
       $('#btnSaveChanges').disabled = true;
@@ -279,6 +304,7 @@
       filters.length = 0;
       highlightCol = '';
       highlightOnlyDup = false;
+      sortState = [];
       renderFiltersUI();
       refreshTables();
       clearResults();
@@ -360,10 +386,10 @@
       filters.length = 0;
       highlightCol = '';
       highlightOnlyDup = false;
+      sortState = [];
       $('#highlightColumn').value = '';
       $('#highlightOnlyDuplicates').checked = false;
       loadPage();
-      // preload SQL input with simple select
       $('#sqlInput').value = `SELECT * FROM "${name}" LIMIT 100;`;
       message(`Tabelle <strong>${escapeHtml(name)}</strong> geöffnet.`, 'info');
     }
@@ -381,6 +407,7 @@
         $('#prevPage').disabled = page <= 0;
         $('#nextPage').disabled = (offset + size) >= total;
         $('#btnSaveChanges').disabled = false;
+        $('#btnClearSort').disabled = false;
       } catch (e) {
         const res = execRaw(`SELECT * FROM "${currentTable}" LIMIT ${size} OFFSET ${offset};`);
         renderResult(res, /*editable=*/false);
@@ -388,6 +415,7 @@
         $('#prevPage').disabled = page <= 0;
         $('#nextPage').disabled = (res?.[0]?.values?.length || 0) < size;
         $('#btnSaveChanges').disabled = true;
+        $('#btnClearSort').disabled = false;
         message(`Hinweis: Tabelle hat evtl. <em>WITHOUT ROWID</em> oder ist eine View – Inline-Bearbeitung deaktiviert.`, 'warning');
       }
     }
@@ -407,9 +435,11 @@
           message('Abfrage ausgeführt (kein Ergebnis-Resultset).', 'success');
           refreshTables(); // schema may have changed
         } else {
+          // Bei Custom Query kein Row-Edit und keine Sort-Vorgaben zurücksetzen
           renderResult(out, /*editable=*/false);
           $('#resultInfo').textContent = `${filteredRows.length} Zeilen (custom query, gefiltert ${filteredRows.length})`;
           $('#btnSaveChanges').disabled = true;
+          $('#btnClearSort').disabled = false;
           message('Abfrage erfolgreich.', 'success');
         }
       } catch (e) {
@@ -474,7 +504,15 @@
       }
     });
 
-    // Render resultset with filters & highlights
+    // Sortierung zurücksetzen
+    $('#btnClearSort').addEventListener('click', () => {
+      sortState = [];
+      if (currentColumns.length) {
+        renderResult([{columns: currentColumns, values: currentRows}], $('#tbody td[contenteditable="true"]').length>0);
+      }
+    });
+
+    // Render resultset with filters, sorting & highlights
     function renderResult(result, editableDefault = true) {
       clearResults();
       if (!result || !result.length) { filteredRows = []; return; }
@@ -488,21 +526,53 @@
       // Apply filters
       filteredRows = applyFilters(currentRows, currentColumns);
 
+      // Apply sorting
+      const toRender = applySorting(filteredRows, currentColumns);
+
       // Build header
       const thead = $('#thead');
       const trh = document.createElement('tr');
-      columns.forEach(c => {
+      columns.forEach((c, colIdx) => {
         const th = document.createElement('th');
         th.textContent = c;
+        th.classList.add('th-sort');
+        th.title = 'Klicken zum Sortieren • Shift = Mehrspaltig';
+        // Sort-Indikator + Index-Badge
+        const ind = document.createElement('span');
+        ind.className = 'sort-ind';
+        const idxBadge = document.createElement('span');
+        idxBadge.className = 'sort-idx';
+        // Aktuellen Sortstatus für diese Spalte finden
+        const sIdx = sortState.findIndex(s => s.idx === colIdx);
+        if (sIdx >= 0) {
+          const dir = sortState[sIdx].dir;
+          ind.textContent = dir === 'asc' ? '▲' : '▼';
+          idxBadge.textContent = (sIdx + 1).toString();
+          th.appendChild(idxBadge);
+        } else {
+          ind.textContent = '—';
+          ind.style.opacity = '.35';
+        }
+        th.appendChild(ind);
+
         // Mark highlighted column
         if (highlightCol && c === highlightCol) th.classList.add('th-highlight');
-        // Set highlight column on click
-        th.style.cursor = 'pointer';
-        th.title = 'Hervorhebung auf diese Spalte setzen';
-        th.addEventListener('click', () => {
-          highlightCol = c === '__rowid__' ? '' : c;
-          renderResult([{columns: currentColumns, values: filteredRows}], editableDefault);
+
+        // Header click: cycle sort
+        th.addEventListener('click', (ev) => {
+          const withShift = ev.shiftKey;
+          cycleSort(colIdx, withShift);
+          // Re-render with same editable mode
+          renderResult([{columns: currentColumns, values: currentRows}], editableDefault);
         });
+
+        // Also set highlight on header click with Alt (optional)
+        th.addEventListener('dblclick', () => {
+          // Doppelklick setzt Highlight-Spalte schnell
+          highlightCol = c === '__rowid__' ? '' : c;
+          renderResult([{columns: currentColumns, values: currentRows}], editableDefault);
+        });
+
         trh.appendChild(th);
       });
       thead.appendChild(trh);
@@ -516,11 +586,11 @@
       const colorMap = new Map();
       if (hlIndex >= 0) {
         const freq = new Map();
-        filteredRows.forEach(row => {
+        toRender.forEach(row => {
           const v = normalizeCell(row[hlIndex]);
           freq.set(v, (freq.get(v) || 0) + 1);
         });
-        filteredRows.forEach(row => {
+        toRender.forEach(row => {
           const v = normalizeCell(row[hlIndex]);
           if (highlightOnlyDup && (freq.get(v) || 0) < 2) return; // skip uniques
           if (!colorMap.has(v)) colorMap.set(v, colorForValue(v));
@@ -528,7 +598,7 @@
       }
 
       // Render body rows
-      filteredRows.forEach(row => {
+      toRender.forEach(row => {
         const tr = document.createElement('tr');
         const rowid = rowidIdx >= 0 ? row[rowidIdx] : null;
         row.forEach((cell, idx) => {
@@ -558,7 +628,7 @@
             td.setAttribute('contenteditable', 'false');
           }
 
-          // Apply highlight color if applicable and cell not marked dirty (dirty has own color)
+          // Apply highlight color
           if (hlIndex >= 0 && idx === hlIndex) {
             const key = normalizeCell(cell);
             const colBg = colorMap.get(key);
@@ -578,7 +648,7 @@
       });
 
       // Info
-      $('#resultInfo').textContent = `${filteredRows.length} Zeilen (gefiltert)`;
+      $('#resultInfo').textContent = `${toRender.length} Zeilen (gefiltert${sortState.length ? ', sortiert' : ''})`;
     }
 
     function fillColumnSelects() {
@@ -632,7 +702,6 @@
     });
 
     function addFilter(col, op, val) {
-      // equals-smart: für Kontextmenü -> numerisch vs. string automatisch
       if (op === 'equals-smart') op = smartEqualsOp(val);
       filters.push({ col, op, val });
       renderFiltersUI();
@@ -701,11 +770,10 @@
     function evalFilter(raw, op, val) {
       const str = raw === null || raw === undefined ? '' : String(raw);
       const isEmpty = str === '' || str.toUpperCase() === 'NULL';
-      // numeric detection
       const aNum = parseFloat(str);
       const bNum = parseFloat(val);
       const aIsNum = !isNaN(aNum) && String(aNum) === str.trim();
-      const bIsNum = !isNaN(bNum) && String(bNum) === val.trim();
+      const bIsNum = !isNaN(bNum) && String(bNum) === String(val).trim();
 
       const a = aIsNum ? aNum : str.toLowerCase();
       const b = bIsNum ? bNum : String(val).toLowerCase();
@@ -726,9 +794,74 @@
       }
     }
 
-    function smartEqualsOp(val) {
-      // für Kontextmenü: equals, aber numerisch korrekt verglichen
-      return '=';
+    function smartEqualsOp(val) { return '='; }
+
+    // --- Sorting ---
+    function cycleSort(colIdx, multi) {
+      // Finde aktuellen Eintrag
+      const i = sortState.findIndex(s => s.idx === colIdx);
+      if (i === -1) {
+        // neu -> asc
+        if (!multi) sortState = [];
+        sortState.push({ idx: colIdx, dir: 'asc' });
+      } else {
+        const dir = sortState[i].dir;
+        if (dir === 'asc') {
+          sortState[i].dir = 'desc';
+        } else {
+          // war desc -> entfernen
+          sortState.splice(i, 1);
+          if (!multi && sortState.length === 0) {
+            // komplett leer lassen
+          }
+        }
+        if (!multi) {
+          // Wenn ohne Shift geklickt wurde: nur diese Spalte behalten
+          if (i !== -1) {
+            const entry = sortState.find(s => s.idx === colIdx);
+            sortState = entry ? [entry] : [];
+          }
+        }
+      }
+    }
+
+    function applySorting(rows, columns) {
+      if (!sortState.length) return rows.slice();
+      const rs = rows.slice();
+      // Stabil sortieren: von letzter Sort-Komponente zur ersten anwenden
+      // Wir benutzen einen einzigen sort()-Comparator, der alle Komponenten berücksichtigt (stabil nicht garantiert, aber ok hier).
+      const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+      rs.sort((a, b) => {
+        for (const s of sortState) {
+          const idx = s.idx;
+          const dir = s.dir === 'asc' ? 1 : -1;
+          const va = a[idx];
+          const vb = b[idx];
+
+          // NULL/leer ans Ende
+          const aNull = va === null || va === undefined || String(va) === '' || String(va).toUpperCase() === 'NULL';
+          const bNull = vb === null || vb === undefined || String(vb) === '' || String(vb).toUpperCase() === 'NULL';
+          if (aNull && bNull) continue;
+          if (aNull && !bNull) return 1;  // a nach hinten
+          if (!aNull && bNull) return -1; // b nach hinten
+
+          // numeric aware
+          const aNum = parseFloat(String(va));
+          const bNum = parseFloat(String(vb));
+          const aIsNum = !isNaN(aNum) && String(aNum) === String(va).trim();
+          const bIsNum = !isNaN(bNum) && String(bNum) === String(vb).trim();
+
+          let cmp = 0;
+          if (aIsNum && bIsNum) {
+            cmp = (aNum < bNum) ? -1 : (aNum > bNum ? 1 : 0);
+          } else {
+            cmp = collator.compare(String(va), String(vb));
+          }
+          if (cmp !== 0) return cmp * dir;
+        }
+        return 0;
+      });
+      return rs;
     }
 
     // Highlight helpers
@@ -737,14 +870,13 @@
       return String(v);
     }
     function colorForValue(val) {
-      // deterministische Pastellfarbe aus String-Hash (HSL)
       const h = hashString(val) % 360;
-      const s = 65; // %
-      const l = 88; // %
+      const s = 65;
+      const l = 88;
       return `hsl(${h} ${s}% ${l}%)`;
     }
     function hashString(s) {
-      let h = 2166136261 >>> 0; // FNV-1a basis
+      let h = 2166136261 >>> 0; // FNV-1a
       for (let i = 0; i < s.length; i++) {
         h ^= s.charCodeAt(i);
         h = Math.imul(h, 16777619);
@@ -752,11 +884,8 @@
       return h >>> 0;
     }
 
-    // Exec helper returning array of resultsets
-    function execRaw(sql) {
-      const results = db.exec(sql);
-      return results;
-    }
+    // Exec helper
+    function execRaw(sql) { return db.exec(sql); }
 
     // Escape HTML
     function escapeHtml(s) {
