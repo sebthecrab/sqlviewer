@@ -25,6 +25,21 @@
     .sticky-top-lite { position: sticky; top: 0; z-index: 5; background: #fff; }
     .paginate button { min-width: 2.5rem; }
     .footer-shadow { box-shadow: 0 -6px 12px rgba(0,0,0,.04); }
+    .filters .form-select, .filters .form-control { min-width: 10rem; }
+    .filter-pill { gap: .4rem; }
+    .filter-pill code { background: rgba(0,0,0,.04); padding: 0 .35rem; border-radius: .25rem; }
+    .th-highlight { position: relative; }
+    .th-highlight::after {
+      content: "🎯";
+      position: absolute;
+      right: .4rem;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: .9rem;
+      opacity: .6;
+    }
+    /* Pastellfarben per Inline-Style; hier nur ein Fallback border-radius */
+    td.hl { border-radius: .25rem; }
     @media (max-width: 992px) {
       .app { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; }
       #sidebar { grid-row: 2; border-right: none; border-bottom: 1px solid #e5e5e5; }
@@ -36,7 +51,7 @@
     <!-- Header -->
     <header class="p-3 border-bottom bg-light">
       <div class="container-fluid d-flex align-items-center gap-3">
-        <h1 class="h4 mb-0">SQLite Browser</h1>
+        <h1 class="h5 mb-0">SQLite Browser – v02</h1>
         <span id="status" class="small-muted ms-auto">
           <span class="status-dot status-none" id="statusDot"></span><span id="statusText">Keine Datei geladen</span>
         </span>
@@ -102,25 +117,66 @@
           </div>
         </section>
 
-        <!-- Results & Table Viewer -->
+        <!-- Filters + Results -->
         <section class="card">
           <div class="card-body">
-            <div class="d-flex align-items-center justify-content-between sticky-top-lite pt-2 pb-2">
-              <div class="d-flex align-items-center gap-2">
-                <h2 class="h6 mb-0">Ergebnisse</h2>
-                <span id="resultInfo" class="badge text-bg-light">0 Zeilen</span>
-              </div>
-              <div class="d-flex align-items-center gap-2">
-                <label class="small text-muted">Limit</label>
-                <input type="number" id="pageSize" class="form-control form-control-sm" style="width: 6rem;" value="100" min="10" max="10000" />
-                <div class="paginate btn-group">
-                  <button id="prevPage" class="btn btn-outline-secondary btn-sm" disabled>&laquo;</button>
-                  <button id="nextPage" class="btn btn-outline-secondary btn-sm" disabled>&raquo;</button>
+            <!-- Filter-Builder -->
+            <div class="sticky-top-lite pt-2 pb-2">
+              <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <div class="d-flex align-items-center gap-2 filters">
+                  <select id="filterColumn" class="form-select form-select-sm" disabled>
+                    <option value="">Spalte wählen…</option>
+                  </select>
+                  <select id="filterOperator" class="form-select form-select-sm" disabled>
+                    <option value="=">=</option>
+                    <option value="!=">≠</option>
+                    <option value="contains">enthält</option>
+                    <option value="starts">beginnt mit</option>
+                    <option value="ends">endet mit</option>
+                    <option value=">">&gt;</option>
+                    <option value=">=">&gt;=</option>
+                    <option value="<">&lt;</option>
+                    <option value="<=">&lt;=</option>
+                    <option value="isnull">ist NULL/leer</option>
+                    <option value="notnull">ist NICHT NULL/leer</option>
+                  </select>
+                  <input id="filterValue" class="form-control form-control-sm" placeholder="Wert…" disabled />
+                  <button id="btnAddFilter" class="btn btn-outline-primary btn-sm" disabled>Filter hinzufügen</button>
+                  <button id="btnClearFilters" class="btn btn-outline-secondary btn-sm" disabled>Alle Filter löschen</button>
                 </div>
-                <button id="btnSaveChanges" class="btn btn-success btn-sm" disabled>Änderungen speichern</button>
+
+                <div class="d-flex align-items-center gap-2">
+                  <label class="small text-muted">Limit</label>
+                  <input type="number" id="pageSize" class="form-control form-control-sm" style="width: 6rem;" value="100" min="10" max="10000" />
+                  <div class="paginate btn-group">
+                    <button id="prevPage" class="btn btn-outline-secondary btn-sm" disabled>&laquo;</button>
+                    <button id="nextPage" class="btn btn-outline-secondary btn-sm" disabled>&raquo;</button>
+                  </div>
+                  <button id="btnSaveChanges" class="btn btn-success btn-sm" disabled>Änderungen speichern</button>
+                </div>
+              </div>
+
+              <!-- Aktive Filter Pills + Highlight Controls -->
+              <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
+                <div id="activeFilters" class="d-flex flex-wrap gap-2"></div>
+                <div class="d-flex align-items-center gap-2">
+                  <label class="small text-muted">Hervorheben nach Spalte</label>
+                  <select id="highlightColumn" class="form-select form-select-sm" disabled style="min-width: 12rem;">
+                    <option value="">– aus –</option>
+                  </select>
+                  <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="highlightOnlyDuplicates" disabled>
+                    <label class="form-check-label small" for="highlightOnlyDuplicates">nur Duplikate</label>
+                  </div>
+                </div>
+              </div>
+              <div class="mt-1 small text-muted">
+                <span id="resultInfo" class="badge text-bg-light">0 Zeilen</span>
+                <span class="ms-2">Klick auf Spaltenkopf setzt die Hervorhebungs-Spalte. Rechtsklick auf eine Zelle → „Nach diesem Wert filtern“.</span>
               </div>
             </div>
 
+            <!-- Table -->
             <div id="results" class="table-wrap mt-3">
               <table class="table table-sm table-hover align-middle mb-0">
                 <thead id="thead"></thead>
@@ -158,7 +214,13 @@
     let currentTable = null;
     let currentRows = [];
     let currentColumns = [];
+    let filteredRows = [];
     let page = 0;
+
+    // Filter / Highlight State
+    const filters = []; // {col, op, val}
+    let highlightCol = '';
+    let highlightOnlyDup = false;
 
     // UI helpers
     const $ = (sel) => document.querySelector(sel);
@@ -169,11 +231,9 @@
       statusText.textContent = text;
       statusDot.className = 'status-dot ' + (mode === 'ok' ? 'status-ok' : mode === 'busy' ? 'status-busy' : 'status-none');
     };
-
     const message = (html, type='secondary') => {
       $('#message').innerHTML = `<div class="alert alert-${type} mb-0">${html}</div>`;
     };
-
     const clearResults = () => {
       $('#thead').innerHTML = '';
       $('#tbody').innerHTML = '';
@@ -196,9 +256,7 @@
       if (!file) return;
       setStatus('Lade Datenbank …', 'busy');
       const buf = new Uint8Array(await file.arrayBuffer());
-      try {
-        db?.close?.();
-      } catch {}
+      try { db?.close?.(); } catch {}
       db = new SQL.Database(buf);
       onDbLoaded(file.name);
     });
@@ -212,12 +270,16 @@
 
     function onDbLoaded(name) {
       setStatus('Geladen: ' + name, 'ok');
-      $('#btnExport').disabled = false;
-      $('#btnRun').disabled = false;
-      $('#btnExplain').disabled = false;
-      $('#sqlInput').disabled = false;
+      ['btnExport','btnRun','btnExplain','sqlInput','btnAddFilter','btnClearFilters','filterColumn','filterOperator','filterValue','highlightColumn','highlightOnlyDuplicates'].forEach(id => {
+        if ($(id.startsWith('#')? id : '#'+id)) $(id.startsWith('#')? id : '#'+id).disabled = false;
+      });
+      $('#btnSaveChanges').disabled = true;
       page = 0;
       currentTable = null;
+      filters.length = 0;
+      highlightCol = '';
+      highlightOnlyDup = false;
+      renderFiltersUI();
       refreshTables();
       clearResults();
       message(`<strong>Datenbank geladen.</strong> Wähle links eine Tabelle oder führe eine Abfrage aus.`, 'success');
@@ -295,6 +357,11 @@
       if (!db) return;
       currentTable = name;
       page = 0;
+      filters.length = 0;
+      highlightCol = '';
+      highlightOnlyDup = false;
+      $('#highlightColumn').value = '';
+      $('#highlightOnlyDuplicates').checked = false;
       loadPage();
       // preload SQL input with simple select
       $('#sqlInput').value = `SELECT * FROM "${name}" LIMIT 100;`;
@@ -304,23 +371,20 @@
     function loadPage() {
       const size = Math.max(10, Math.min(10000, parseInt($('#pageSize').value || '100', 10)));
       const offset = page * size;
-
       try {
-        // Try to fetch ROWID for editable updates
         const res = execRaw(`SELECT rowid AS __rowid__, * FROM "${currentTable}" LIMIT ${size} OFFSET ${offset};`);
         const countRes = execRaw(`SELECT COUNT(*) AS cnt FROM "${currentTable}";`);
         const total = countRes?.[0]?.values?.[0]?.[0] ?? 0;
 
         renderResult(res);
-        $('#resultInfo').textContent = `${res?.[0]?.values?.length || 0} Zeilen (Seite ${page + 1}, gesamt ${total})`;
+        $('#resultInfo').textContent = `${filteredRows.length} Zeilen (Seite ${page + 1}, gesamt ${total}, gefiltert ${filteredRows.length})`;
         $('#prevPage').disabled = page <= 0;
         $('#nextPage').disabled = (offset + size) >= total;
         $('#btnSaveChanges').disabled = false;
       } catch (e) {
-        // Fallback for WITHOUT ROWID or views
         const res = execRaw(`SELECT * FROM "${currentTable}" LIMIT ${size} OFFSET ${offset};`);
         renderResult(res, /*editable=*/false);
-        $('#resultInfo').textContent = `${res?.[0]?.values?.length || 0} Zeilen (Seite ${page + 1})`;
+        $('#resultInfo').textContent = `${filteredRows.length} Zeilen (Seite ${page + 1})`;
         $('#prevPage').disabled = page <= 0;
         $('#nextPage').disabled = (res?.[0]?.values?.length || 0) < size;
         $('#btnSaveChanges').disabled = true;
@@ -344,7 +408,7 @@
           refreshTables(); // schema may have changed
         } else {
           renderResult(out, /*editable=*/false);
-          $('#resultInfo').textContent = `${out[0].values.length} Zeilen (custom query)`;
+          $('#resultInfo').textContent = `${filteredRows.length} Zeilen (custom query, gefiltert ${filteredRows.length})`;
           $('#btnSaveChanges').disabled = true;
           message('Abfrage erfolgreich.', 'success');
         }
@@ -361,7 +425,7 @@
       try {
         const out = execRaw('EXPLAIN ' + sql);
         renderResult(out, /*editable=*/false);
-        $('#resultInfo').textContent = `${out[0]?.values?.length || 0} Zeilen (EXPLAIN)`;
+        $('#resultInfo').textContent = `${filteredRows.length} Zeilen (EXPLAIN)`;
         $('#btnSaveChanges').disabled = true;
         message('EXPLAIN ausgeführt.', 'info');
       } catch (e) {
@@ -377,16 +441,14 @@
         message('Keine Änderungen vorhanden.', 'secondary');
         return;
       }
-      // Aggregate changes per rowid
       const changesByRow = new Map();
       for (const td of dirtyCells) {
         const col = td.dataset.col;
-        const val = td.textContent;
+        const val = td.textContent === 'NULL' ? null : td.textContent;
         const rowid = td.dataset.rowid;
         if (!changesByRow.has(rowid)) changesByRow.set(rowid, new Map());
         changesByRow.get(rowid).set(col, val);
       }
-
       try {
         db.run('BEGIN;');
         for (const [rowid, changes] of changesByRow.entries()) {
@@ -404,7 +466,6 @@
           stmt.free();
         }
         db.run('COMMIT;');
-        // Clean state
         dirtyCells.forEach(td => { td.classList.remove('dirty'); td.dataset.original = td.textContent; });
         message(`Änderungen gespeichert: ${changesByRow.size} Zeile(n) aktualisiert.`, 'success');
       } catch (e) {
@@ -413,13 +474,19 @@
       }
     });
 
-    // Render resultset
+    // Render resultset with filters & highlights
     function renderResult(result, editableDefault = true) {
       clearResults();
-      if (!result || !result.length) return;
+      if (!result || !result.length) { filteredRows = []; return; }
       const { columns, values } = result[0];
       currentColumns = columns;
       currentRows = values;
+
+      // Build selects for filters & highlight
+      fillColumnSelects();
+
+      // Apply filters
+      filteredRows = applyFilters(currentRows, currentColumns);
 
       // Build header
       const thead = $('#thead');
@@ -427,24 +494,62 @@
       columns.forEach(c => {
         const th = document.createElement('th');
         th.textContent = c;
+        // Mark highlighted column
+        if (highlightCol && c === highlightCol) th.classList.add('th-highlight');
+        // Set highlight column on click
+        th.style.cursor = 'pointer';
+        th.title = 'Hervorhebung auf diese Spalte setzen';
+        th.addEventListener('click', () => {
+          highlightCol = c === '__rowid__' ? '' : c;
+          renderResult([{columns: currentColumns, values: filteredRows}], editableDefault);
+        });
         trh.appendChild(th);
       });
       thead.appendChild(trh);
 
-      // Build body
+      // Build body with highlighting
       const tbody = $('#tbody');
       const rowidIdx = columns.indexOf('__rowid__');
-      values.forEach(row => {
+
+      // Prepare highlight color map for selected column
+      const hlIndex = highlightCol ? columns.indexOf(highlightCol) : -1;
+      const colorMap = new Map();
+      if (hlIndex >= 0) {
+        const freq = new Map();
+        filteredRows.forEach(row => {
+          const v = normalizeCell(row[hlIndex]);
+          freq.set(v, (freq.get(v) || 0) + 1);
+        });
+        filteredRows.forEach(row => {
+          const v = normalizeCell(row[hlIndex]);
+          if (highlightOnlyDup && (freq.get(v) || 0) < 2) return; // skip uniques
+          if (!colorMap.has(v)) colorMap.set(v, colorForValue(v));
+        });
+      }
+
+      // Render body rows
+      filteredRows.forEach(row => {
         const tr = document.createElement('tr');
         const rowid = rowidIdx >= 0 ? row[rowidIdx] : null;
         row.forEach((cell, idx) => {
           const td = document.createElement('td');
-          td.textContent = cell === null ? 'NULL' : String(cell);
+          const display = cell === null ? 'NULL' : String(cell);
+          td.textContent = display;
           td.dataset.col = columns[idx];
+
+          // Context menu: filter by this value
+          td.addEventListener('contextmenu', (ev) => {
+            ev.preventDefault();
+            const col = columns[idx];
+            if (col === '__rowid__') return;
+            addFilter(col, 'equals-smart', display);
+          });
+
+          // Editable?
           if (rowid !== null && columns[idx] !== '__rowid__' && editableDefault) {
             td.setAttribute('contenteditable', 'true');
             td.dataset.rowid = rowid;
-            td.dataset.original = td.textContent;
+            td.dataset.original = display;
             td.addEventListener('input', () => {
               if (td.textContent !== td.dataset.original) td.classList.add('dirty');
               else td.classList.remove('dirty');
@@ -452,15 +557,203 @@
           } else {
             td.setAttribute('contenteditable', 'false');
           }
+
+          // Apply highlight color if applicable and cell not marked dirty (dirty has own color)
+          if (hlIndex >= 0 && idx === hlIndex) {
+            const key = normalizeCell(cell);
+            const colBg = colorMap.get(key);
+            if (colBg) {
+              td.classList.add('hl');
+              td.style.background = colBg;
+            } else {
+              td.style.background = '';
+            }
+          } else {
+            td.style.background = '';
+          }
+
           tr.appendChild(td);
         });
         tbody.appendChild(tr);
       });
+
+      // Info
+      $('#resultInfo').textContent = `${filteredRows.length} Zeilen (gefiltert)`;
+    }
+
+    function fillColumnSelects() {
+      const selects = [$('#filterColumn'), $('#highlightColumn')];
+      selects.forEach(sel => {
+        const prev = sel.value;
+        sel.innerHTML = '';
+        const opt0 = document.createElement('option');
+        opt0.value = '';
+        opt0.textContent = sel.id === 'highlightColumn' ? '– aus –' : 'Spalte wählen…';
+        sel.appendChild(opt0);
+        currentColumns.forEach(c => {
+          const o = document.createElement('option');
+          o.value = c;
+          o.textContent = c;
+          sel.appendChild(o);
+        });
+        if (prev && currentColumns.includes(prev)) sel.value = prev;
+      });
+    }
+
+    // Filters UI
+    $('#btnAddFilter').addEventListener('click', () => {
+      const col = $('#filterColumn').value;
+      const op = $('#filterOperator').value;
+      const val = $('#filterValue').value;
+      if (!col) { message('Bitte Spalte wählen.', 'warning'); return; }
+      if (!['isnull','notnull'].includes(op) && !val) { message('Bitte Filterwert eingeben.', 'warning'); return; }
+      addFilter(col, op, val);
+    });
+
+    $('#btnClearFilters').addEventListener('click', () => {
+      filters.length = 0;
+      renderFiltersUI();
+      if (currentColumns.length) {
+        renderResult([{columns: currentColumns, values: currentRows}], $('#tbody td[contenteditable="true"]').length>0);
+      }
+    });
+
+    $('#highlightColumn').addEventListener('change', () => {
+      highlightCol = $('#highlightColumn').value;
+      if (currentColumns.length) {
+        renderResult([{columns: currentColumns, values: filteredRows.length? filteredRows: currentRows}], $('#tbody td[contenteditable="true"]').length>0);
+      }
+    });
+    $('#highlightOnlyDuplicates').addEventListener('change', () => {
+      highlightOnlyDup = $('#highlightOnlyDuplicates').checked;
+      if (currentColumns.length) {
+        renderResult([{columns: currentColumns, values: filteredRows.length? filteredRows: currentRows}], $('#tbody td[contenteditable="true"]').length>0);
+      }
+    });
+
+    function addFilter(col, op, val) {
+      // equals-smart: für Kontextmenü -> numerisch vs. string automatisch
+      if (op === 'equals-smart') op = smartEqualsOp(val);
+      filters.push({ col, op, val });
+      renderFiltersUI();
+      if (currentColumns.length) {
+        renderResult([{columns: currentColumns, values: currentRows}], $('#tbody td[contenteditable="true"]').length>0);
+      }
+    }
+
+    function renderFiltersUI() {
+      const wrap = $('#activeFilters');
+      wrap.innerHTML = '';
+      if (!filters.length) {
+        const span = document.createElement('span');
+        span.className = 'text-muted small';
+        span.textContent = 'Keine aktiven Filter.';
+        wrap.appendChild(span);
+        return;
+      }
+      filters.forEach((f, idx) => {
+        const div = document.createElement('div');
+        div.className = 'badge text-bg-light d-inline-flex align-items-center filter-pill';
+        const opLabel = opToLabel(f.op);
+        const code = document.createElement('span');
+        code.innerHTML = `<code>${escapeHtml(f.col)}</code> ${escapeHtml(opLabel)} ${['isnull','notnull'].includes(f.op) ? '' : '<code>'+escapeHtml(f.val)+'</code>'}`;
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-sm btn-outline-secondary';
+        btn.textContent = '×';
+        btn.title = 'Filter entfernen';
+        btn.addEventListener('click', () => {
+          filters.splice(idx, 1);
+          renderFiltersUI();
+          renderResult([{columns: currentColumns, values: currentRows}], $('#tbody td[contenteditable="true"]').length>0);
+        });
+        div.appendChild(code);
+        div.appendChild(btn);
+        wrap.appendChild(div);
+      });
+    }
+
+    function opToLabel(op) {
+      switch (op) {
+        case '=': return '=';
+        case '!=': return '≠';
+        case 'contains': return 'enthält';
+        case 'starts': return 'beginnt mit';
+        case 'ends': return 'endet mit';
+        case '>': case '>=': case '<': case '<=': return op;
+        case 'isnull': return 'ist NULL/leer';
+        case 'notnull': return 'ist NICHT NULL/leer';
+        default: return op;
+      }
+    }
+
+    function applyFilters(rows, columns) {
+      if (!filters.length) return rows.slice();
+      const idxMap = new Map(columns.map((c, i) => [c, i]));
+      return rows.filter(row => {
+        return filters.every(f => {
+          const i = idxMap.get(f.col);
+          const raw = i !== undefined ? row[i] : undefined;
+          return evalFilter(raw, f.op, f.val);
+        });
+      });
+    }
+
+    function evalFilter(raw, op, val) {
+      const str = raw === null || raw === undefined ? '' : String(raw);
+      const isEmpty = str === '' || str.toUpperCase() === 'NULL';
+      // numeric detection
+      const aNum = parseFloat(str);
+      const bNum = parseFloat(val);
+      const aIsNum = !isNaN(aNum) && String(aNum) === str.trim();
+      const bIsNum = !isNaN(bNum) && String(bNum) === val.trim();
+
+      const a = aIsNum ? aNum : str.toLowerCase();
+      const b = bIsNum ? bNum : String(val).toLowerCase();
+
+      switch (op) {
+        case '=': return aIsNum && bIsNum ? a === b : str.toLowerCase() === String(val).toLowerCase();
+        case '!=': return aIsNum && bIsNum ? a !== b : str.toLowerCase() !== String(val).toLowerCase();
+        case 'contains': return String(str).toLowerCase().includes(String(val).toLowerCase());
+        case 'starts': return String(str).toLowerCase().startsWith(String(val).toLowerCase());
+        case 'ends': return String(str).toLowerCase().endsWith(String(val).toLowerCase());
+        case '>': return aIsNum && bIsNum ? a > b : String(str).toLowerCase() > String(val).toLowerCase();
+        case '>=': return aIsNum && bIsNum ? a >= b : String(str).toLowerCase() >= String(val).toLowerCase();
+        case '<': return aIsNum && bIsNum ? a < b : String(str).toLowerCase() < String(val).toLowerCase();
+        case '<=': return aIsNum && bIsNum ? a <= b : String(str).toLowerCase() <= String(val).toLowerCase();
+        case 'isnull': return raw === null || isEmpty;
+        case 'notnull': return raw !== null && !isEmpty;
+        default: return true;
+      }
+    }
+
+    function smartEqualsOp(val) {
+      // für Kontextmenü: equals, aber numerisch korrekt verglichen
+      return '=';
+    }
+
+    // Highlight helpers
+    function normalizeCell(v) {
+      if (v === null || v === undefined) return 'NULL';
+      return String(v);
+    }
+    function colorForValue(val) {
+      // deterministische Pastellfarbe aus String-Hash (HSL)
+      const h = hashString(val) % 360;
+      const s = 65; // %
+      const l = 88; // %
+      return `hsl(${h} ${s}% ${l}%)`;
+    }
+    function hashString(s) {
+      let h = 2166136261 >>> 0; // FNV-1a basis
+      for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return h >>> 0;
     }
 
     // Exec helper returning array of resultsets
     function execRaw(sql) {
-      // Support multiple statements
       const results = db.exec(sql);
       return results;
     }
@@ -477,7 +770,6 @@
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
-      // Ctrl/Cmd + Enter = Run
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         if (!$('#btnRun').disabled) $('#btnRun').click();
       }
